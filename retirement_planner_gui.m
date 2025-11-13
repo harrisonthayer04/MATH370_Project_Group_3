@@ -1,140 +1,283 @@
 function retirement_planner_gui
-% RETIREMENT_PLANNER_GUI
-% GUI to compute required monthly retirement contributions and visualize balance.
-% - X-axis shows AGE (years)
-% - Results area resizes with window
-% - Assumes END-of-month contributions (annuity-immediate)
-% - Inflation must be a DECIMAL (e.g., 0.03)
-% - NEW: User sets a RETURN RANGE [min,max] (decimals). We plot 4 scenarios
-%        at evenly spaced rates across the range; each scenario computes its own C.
+% RETIREMENT_PLANNER_GUI (wizard version)
+% Step 1: compute S from cost categories
+% Step 2: specify retirement horizon, inflation, return range, current savings, age
+% Step 3: view required contributions and balance graphs (for a range of returns)
+% S = H + Trans + Food + Med + W  (all monthly in today's dollars)
 
-    % --- UI Shell ---
-    f = uifigure('Name','Retirement Planner','Position',[100 100 980 600]);
-    gl = uigridlayout(f, [12 4]);
-    gl.ColumnWidth = {'1x','1x','1x','1x'};
-    % Row 12 is the stretch row so the output area resizes with the window
-    gl.RowHeight   = {30,30,30,30,30,30,30,30,30,30,'fit','1x'};
+    % Main window + layout
+    f = uifigure('Name','Retirement Planner','Position',[100 100 1100 720]);
 
-    % --- Inputs ---
-    uilabel(gl,'Text','Desired monthly spending today ($):','HorizontalAlignment','right');
-    SField  = uieditfield(gl,'numeric','Value',5000,'Limits',[0 Inf]); SField.Layout.Column = [2 4];
+    mainGL = uigridlayout(f,[2 1]);
+    mainGL.RowHeight   = {'1x',60};     % more space for bottom buttons
+    mainGL.ColumnWidth = {'1x'};
 
-    uilabel(gl,'Text','Years until retirement:','HorizontalAlignment','right');
-    TField  = uieditfield(gl,'numeric','Value',25,'Limits',[0 Inf]);   TField.Layout.Column = [2 4];
+    % Content container
+    contentPanel = uipanel(mainGL);
+    contentPanel.Layout.Row    = 1;
+    contentPanel.Layout.Column = 1;
 
-    uilabel(gl,'Text','Years in retirement:','HorizontalAlignment','right');
-    LField  = uieditfield(gl,'numeric','Value',30,'Limits',[0 Inf]);   LField.Layout.Column = [2 4];
+    contentGL = uigridlayout(contentPanel,[1 1]);
+    contentGL.RowHeight   = {'1x'};
+    contentGL.ColumnWidth = {'1x'};
 
-    % --- Return RANGE (decimals) ---
-    uilabel(gl,'Text','Nominal annual return MIN (decimal, e.g., 0.06):','HorizontalAlignment','right');
-    rMinField  = uieditfield(gl,'numeric','Value',0.06,'Limits',[0 1]); rMinField.Layout.Column = [2 4];
+    % Navigation container
+    navPanel = uipanel(mainGL);
+    navPanel.Layout.Row    = 2;
+    navPanel.Layout.Column = 1;
 
-    uilabel(gl,'Text','Nominal annual return MAX (decimal, e.g., 0.12):','HorizontalAlignment','right');
-    rMaxField  = uieditfield(gl,'numeric','Value',0.12,'Limits',[0 1]); rMaxField.Layout.Column = [2 4];
+    navGL = uigridlayout(navPanel,[1 3]);
+    navGL.ColumnWidth = {150, '1x', 150};
+    navGL.RowHeight   = {'1x'};
+    navGL.Padding     = [10 5 10 5];
 
-    uilabel(gl,'Text','Annual inflation (decimal, e.g., 0.03):','HorizontalAlignment','right');
-    piField = uieditfield(gl,'numeric','Value',0.03,'Limits',[0 1]);   piField.Layout.Column = [2 4];
+    prevBtn = uibutton(navGL,'Text','< Previous','ButtonPushedFcn',@onPrev);
+    prevBtn.Layout.Row = 1; prevBtn.Layout.Column = 1;
 
-    uilabel(gl,'Text','Current savings ($):','HorizontalAlignment','right');
-    P0Field = uieditfield(gl,'numeric','Value',0,'Limits',[0 Inf]);    P0Field.Layout.Column = [2 4];
+    stepLabel = uilabel(navGL,'Text','Step 1 of 3: Monthly Spending',...
+                        'HorizontalAlignment','center');
+    stepLabel.Layout.Row = 1; stepLabel.Layout.Column = 2;
 
-    uilabel(gl,'Text','Current age (years):','HorizontalAlignment','right');
-    AgeField = uieditfield(gl,'numeric','Value',25,'Limits',[0 120]);  AgeField.Layout.Column = [2 4];
+    nextBtn = uibutton(navGL,'Text','Next >','ButtonPushedFcn',@onNext);
+    nextBtn.Layout.Row = 1; nextBtn.Layout.Column = 3;
 
-    % --- Buttons ---
-    calcBtn = uibutton(gl,'Text','Compute & Plot Scenarios','ButtonPushedFcn',@onCompute);
-    calcBtn.Layout.Column = [1 2];
-    resetBtn = uibutton(gl,'Text','Reset','ButtonPushedFcn',@onReset);
-    resetBtn.Layout.Column = [3 4];
+    % ===========================
+    % Page 1: Cost breakdown -> S
+    % ===========================
+    page1 = uipanel(contentGL,'Title','Step 1: Monthly Spending (S = H + Trans + Food + Med + W)');
+    page1.Layout.Row = 1; page1.Layout.Column = 1;
 
-    % --- Note (fixed-height rows) ---
-    note1 = uilabel(gl,'Text',...
-        'Returns & inflation must be decimals (e.g., 0.06 = 6%). We plot 4 evenly spaced return scenarios across your range.',...
+    gl1 = uigridlayout(page1,[8 4]);
+    gl1.ColumnWidth = {'1x','1x','1x','1x'};
+    gl1.RowHeight   = {30,30,30,30,30,30,30,'1x'};
+
+    uilabel(gl1,'Text','Monthly Housing (H):','HorizontalAlignment','right');
+    HField  = uieditfield(gl1,'numeric','Value',2000,'Limits',[0 Inf]); 
+    HField.Layout.Column = [2 4];
+
+    uilabel(gl1,'Text','Monthly Transportation (Trans):','HorizontalAlignment','right');
+    TransField  = uieditfield(gl1,'numeric','Value',600,'Limits',[0 Inf]); 
+    TransField.Layout.Column = [2 4];
+
+    uilabel(gl1,'Text','Monthly Food (Food):','HorizontalAlignment','right');
+    FoodField  = uieditfield(gl1,'numeric','Value',600,'Limits',[0 Inf]); 
+    FoodField.Layout.Column = [2 4];
+
+    uilabel(gl1,'Text','Monthly Medical (Med):','HorizontalAlignment','right');
+    MedField  = uieditfield(gl1,'numeric','Value',400,'Limits',[0 Inf]); 
+    MedField.Layout.Column = [2 4];
+
+    uilabel(gl1,'Text','Monthly Wants (W total):','HorizontalAlignment','right');
+    WField  = uieditfield(gl1,'numeric','Value',800,'Limits',[0 Inf]); 
+    WField.Layout.Column = [2 4];
+
+    uilabel(gl1,'Text','Total monthly spending S (computed):','HorizontalAlignment','right');
+    SLabel = uilabel(gl1,'Text','$0.00','FontWeight','bold');
+    SLabel.Layout.Column = [2 4];
+
+    computeSBtn = uibutton(gl1,'Text','Compute S','ButtonPushedFcn',@onComputeS);
+    computeSBtn.Layout.Row = 6; computeSBtn.Layout.Column = 1;
+
+    note1 = uilabel(gl1,'Text',...
+        'All amounts are monthly in today''s dollars. S is your post-retirement spending target.',...
         'FontAngle','italic');
-    note1.Layout.Row = 11; note1.Layout.Column = [1 4];
+    note1.Layout.Row = 7; note1.Layout.Column = [1 4];
 
-    % --- Results Area (resizable row 12) ---
-    resultPanel = uipanel(gl,'Title','Results'); 
-    resultPanel.Layout.Row = 12; 
-    resultPanel.Layout.Column = [1 4];
+    % ===========================
+    % Page 2: Retirement inputs & return range
+    % ===========================
+    page2 = uipanel(contentGL,'Title','Step 2: Retirement Horizon and Return Assumptions');
+    page2.Layout.Row = 1; page2.Layout.Column = 1;
+    page2.Visible = 'off';
 
-    % Inner grid that resizes: labels 'fit', values/chart/details stretch
-    rg = uigridlayout(resultPanel,[4 2]); 
-    rg.RowHeight   = {'fit','fit','3x','1x'};
-    rg.ColumnWidth = {'fit','1x'};
+    gl2 = uigridlayout(page2,[9 4]);
+    gl2.ColumnWidth = {'1x','1x','1x','1x'};
+    gl2.RowHeight   = {30,30,30,30,30,30,30,30,'1x'};
 
-    uilabel(rg,'Text','Scenarios (rate → required C):','HorizontalAlignment','right');
-    CLabel = uilabel(rg,'Text','—','FontWeight','bold'); % will show summary of Cs per rate
+    uilabel(gl2,'Text','Total monthly spending S (from Step 1):','HorizontalAlignment','right');
+    SDisplayLabel = uilabel(gl2,'Text','$0.00','FontWeight','bold');
+    SDisplayLabel.Layout.Column = [2 4];
 
-    uilabel(rg,'Text','Required nest egg @ retirement (nominal $) [baseline=min rate]:','HorizontalAlignment','right');
-    BNLabel = uilabel(rg,'Text','—');
+    uilabel(gl2,'Text','Years until retirement (T):','HorizontalAlignment','right');
+    TField  = uieditfield(gl2,'numeric','Value',25,'Limits',[0 Inf]);   
+    TField.Layout.Column = [2 4];
 
-    % Chart occupies big row 3
-    ax = uiaxes(rg);
+    uilabel(gl2,'Text','Years in retirement (L):','HorizontalAlignment','right');
+    LField  = uieditfield(gl2,'numeric','Value',30,'Limits',[0 Inf]);   
+    LField.Layout.Column = [2 4];
+
+    uilabel(gl2,'Text','Nominal annual return MIN (decimal, e.g., 0.06):','HorizontalAlignment','right');
+    rMinField  = uieditfield(gl2,'numeric','Value',0.06,'Limits',[0 1]); 
+    rMinField.Layout.Column = [2 4];
+
+    uilabel(gl2,'Text','Nominal annual return MAX (decimal, e.g., 0.12):','HorizontalAlignment','right');
+    rMaxField  = uieditfield(gl2,'numeric','Value',0.12,'Limits',[0 1]); 
+    rMaxField.Layout.Column = [2 4];
+
+    uilabel(gl2,'Text','Annual inflation (decimal, e.g., 0.03):','HorizontalAlignment','right');
+    piField = uieditfield(gl2,'numeric','Value',0.03,'Limits',[0 1]);   
+    piField.Layout.Column = [2 4];
+
+    uilabel(gl2,'Text','Current savings (P0) ($):','HorizontalAlignment','right');
+    P0Field = uieditfield(gl2,'numeric','Value',0,'Limits',[0 Inf]);    
+    P0Field.Layout.Column = [2 4];
+
+    uilabel(gl2,'Text','Current age (years):','HorizontalAlignment','right');
+    AgeField = uieditfield(gl2,'numeric','Value',25,'Limits',[0 120]);  
+    AgeField.Layout.Column = [2 4];
+
+    % ===========================
+    % Page 3: Results (graphs + summary)
+    % ===========================
+    page3 = uipanel(contentGL,'Title','Step 3: Results');
+    page3.Layout.Row = 1; page3.Layout.Column = 1;
+    page3.Visible = 'off';
+
+    gl3 = uigridlayout(page3,[4 2]);
+    gl3.RowHeight   = {'fit','fit','3x','1x'};
+    gl3.ColumnWidth = {'fit','1x'};
+
+    uilabel(gl3,'Text','Scenarios (rate → required C):','HorizontalAlignment','right');
+    CLabel = uilabel(gl3,'Text','—','FontWeight','bold');
+
+    uilabel(gl3,'Text','Required nest egg @ retirement (nominal $) [baseline=min rate]:','HorizontalAlignment','right');
+    BNLabel = uilabel(gl3,'Text','—');
+
+    ax = uiaxes(gl3);
     ax.Layout.Row = 3; 
     ax.Layout.Column = [1 2];
     title(ax,'Retirement Account Balance — Return Scenarios');
     xlabel(ax,'Age (years)'); ylabel(ax,'Balance ($)');
     grid(ax,'on');
 
-    % Details area (row 4)
-    detailsArea = uitextarea(rg,'Editable','off','Value',{'Press Compute to view details...'});
+    detailsArea = uitextarea(gl3,'Editable','off','Value',{'Complete Steps 1 and 2, then click Next to view results.'});
     detailsArea.Layout.Row = 4; 
     detailsArea.Layout.Column = [1 2];
 
-    % ===========================
-    % Callbacks (nested functions)
-    % ===========================
+    % State
+    currentPage = 1;
 
-    function onCompute(~,~)
-        % Compute button callback
+    % ===========================
+    % Navigation helpers
+    % ===========================
+    function showPage(p)
+        currentPage = p;
+        switch p
+            case 1
+                page1.Visible = 'on';
+                page2.Visible = 'off';
+                page3.Visible = 'off';
+                prevBtn.Enable = 'off';
+                nextBtn.Enable = 'on';
+                nextBtn.Text   = 'Next >';
+                stepLabel.Text = 'Step 1 of 3: Monthly Spending';
+            case 2
+                page1.Visible = 'off';
+                page2.Visible = 'on';
+                page3.Visible = 'off';
+                prevBtn.Enable = 'on';
+                nextBtn.Enable = 'on';
+                nextBtn.Text   = 'Next >';
+                stepLabel.Text = 'Step 2 of 3: Retirement Inputs';
+            case 3
+                page1.Visible = 'off';
+                page2.Visible = 'off';
+                page3.Visible = 'on';
+                prevBtn.Enable = 'on';
+                nextBtn.Enable = 'off';
+                stepLabel.Text = 'Step 3 of 3: Results';
+        end
+    end
+
+    function onPrev(~,~)
+        if currentPage > 1
+            showPage(currentPage - 1);
+        end
+    end
+
+    function onNext(~,~)
+        switch currentPage
+            case 1
+                updateSLabel();
+                showPage(2);
+            case 2
+                ok = computeAndPlot();
+                if ok
+                    showPage(3);
+                end
+        end
+    end
+
+    % ===========================
+    % Cost computation (S)
+    % ===========================
+    function onComputeS(~,~)
+        updateSLabel();
+    end
+
+    function updateSLabel()
+        H    = HField.Value;
+        Trans= TransField.Value;
+        Food = FoodField.Value;
+        Med  = MedField.Value;
+        W    = WField.Value;
+        S    = H + Trans + Food + Med + W;
+        SLabel.Text        = dollar(S);
+        SDisplayLabel.Text = dollar(S);
+    end
+
+    % ===========================
+    % Core computation and plotting
+    % ===========================
+    function ok = computeAndPlot()
+        ok = false;
         try
-            S    = SField.Value;
+            H    = HField.Value;
+            Trans= TransField.Value;
+            Food = FoodField.Value;
+            Med  = MedField.Value;
+            W    = WField.Value;
+            S    = H + Trans + Food + Med + W;
+
             T    = TField.Value;
             L    = LField.Value;
-            rMin = rMinField.Value;   % DECIMAL REQUIRED
-            rMax = rMaxField.Value;   % DECIMAL REQUIRED
-            pi   = piField.Value;     % DECIMAL REQUIRED
+            rMin = rMinField.Value;
+            rMax = rMaxField.Value;
+            pi   = piField.Value;
             P0   = P0Field.Value;
-            age  = AgeField.Value;    % Current age in years
+            age  = AgeField.Value;
 
             validateInputs(S,T,L,rMin,rMax,pi,P0,age);
 
-            % Build 4 evenly spaced scenarios across [rMin, rMax]
             if abs(rMax - rMin) < 1e-12
-                rates = rMin; % single scenario if equal
+                rates = rMin;
             else
                 rates = linspace(rMin, rMax, 4);
             end
 
-            % Compute C and simulate for each scenario
             cla(ax); hold(ax,'on');
             years_max = age + T + L;
-            legendEntries = {};
             Cs = zeros(numel(rates),1);
-            B_nominal_baseline = NaN;
 
-            % Shaded phases (draw once, behind lines)
-            % Use baseline (min) for vertical markers; shading applies to all scenarios equally
-            retireAge = age + T; endAge = age + T + L;
-            yMin = 0; yMax = 1; % temporary; update after plotting
+            retireAge = age + T; 
+            endAge    = age + T + L;
+            yMin = 0; yMax = 1;
+
             hSav = patch(ax, [age retireAge retireAge age], [0 0 1 1], [0 0.5 0], ...
                 'FaceAlpha',0.08,'EdgeColor','none','HandleVisibility','off');
             hRet = patch(ax, [retireAge endAge endAge retireAge], [0 0 1 1], [0.8 0 0], ...
                 'FaceAlpha',0.08,'EdgeColor','none','HandleVisibility','off');
 
-            colors = lines(max(4,numel(rates))); % distinct colors
+            colors = lines(max(4,numel(rates)));
 
             for k = 1:numel(rates)
                 i = rates(k);
-                % Required monthly contribution for this rate
                 [C, d] = compute_retirement_contribution(S, T, L, i, pi, P0, false);
                 Cs(k) = C;
                 if k == 1
-                    BNLabel.Text = dollar(d.B_nominal); % show baseline nest egg (min rate)
+                    BNLabel.Text = dollar(d.B_nominal);
                 end
 
-                % Simulate balance path for this scenario
                 [tMonths, bal] = simulate_balance(S, T, L, i, pi, P0, C);
                 yearsFromToday = tMonths/12;
                 ages = age + yearsFromToday;
@@ -142,22 +285,18 @@ function retirement_planner_gui
                 plot(ax, ages, bal, 'LineWidth', 1.7, 'Color', colors(k,:), ...
                     'DisplayName', sprintf('i = %.1f%%  (C = %s)', 100*i, dollar(C)));
 
-                % Track y-lims
                 if k == 1
                     yMin = min(0, min(bal)*1.05);
-                    yMax = max( max(1, max(bal)*1.10), 1 );
+                    yMax = max(max(1, max(bal)*1.10), 1);
                 else
                     yMin = min(yMin, min(0, min(bal)*1.05));
-                    yMax = max(yMax, max( max(1, max(bal)*1.10), 1 ));
+                    yMax = max(yMax, max(max(1, max(bal)*1.10), 1));
                 end
-                legendEntries{end+1} = sprintf('i = %.1f%%  (C = %s)', 100*i, dollar(C)); %#ok<AGROW>
             end
 
-            % Update shading to full y-range
             set(hSav,'YData',[yMin yMin yMax yMax]);
             set(hRet,'YData',[yMin yMin yMax yMax]);
 
-            % Retirement marker with age label
             xline(ax, retireAge, '--', sprintf('Retire (Age %.0f)', retireAge), ...
                 'LabelHorizontalAlignment','left', ...
                 'LabelVerticalAlignment','bottom');
@@ -167,7 +306,6 @@ function retirement_planner_gui
             xlabel(ax,'Age (years)');
             legend(ax,'Location','northeast');
 
-            % Summary label of Cs
             if numel(rates) == 1
                 CLabel.Text = sprintf('i = %.2f%% → C = %s', 100*rates(1), dollar(Cs(1)));
             else
@@ -178,8 +316,14 @@ function retirement_planner_gui
                 CLabel.Text = strjoin(parts, '   |   ');
             end
 
-            % Details
             detailsArea.Value = { ...
+                sprintf('Housing (H):             $%.2f', H), ...
+                sprintf('Transportation (Trans):  $%.2f', Trans), ...
+                sprintf('Food:                     $%.2f', Food), ...
+                sprintf('Medical (Med):            $%.2f', Med), ...
+                sprintf('Wants (W total):          $%.2f', W), ...
+                sprintf('Total S = H+Trans+Food+Med+W: $%.2f', S), ...
+                ' ', ...
                 sprintf('Current age: %.0f', age), ...
                 sprintf('Retirement age: %.0f', retireAge), ...
                 sprintf('End age: %.0f', endAge), ...
@@ -187,60 +331,39 @@ function retirement_planner_gui
                 sprintf('Years in retirement (L): %g', L), ...
                 sprintf('Inflation (annual, decimal): %.4f', pi), ...
                 sprintf('Return scenarios (annual, decimal): [%s]', join(string(rates), ', ')), ...
-                'Note: Each line uses its own required monthly contribution C for that return.' ...
+                'Each line uses its own required monthly contribution C for that return.' ...
             };
+
+            ok = true;
 
         catch ME
             uialert(f, ME.message, 'Input Error');
         end
-    end % onCompute
+    end
 
-    function onReset(~,~)
-        % Reset button callback
-        SField.Value  = 5000;
-        TField.Value  = 25;
-        LField.Value  = 30;
-        rMinField.Value = 0.06;
-        rMaxField.Value = 0.12;
-        piField.Value = 0.03;
-        P0Field.Value = 0;
-        AgeField.Value = 25;
-        CLabel.Text  = '—';
-        BNLabel.Text = '—';
-        detailsArea.Value = {'Press Compute to view details...'};
-        cla(ax);
-    end % onReset
-
-    % ==========
     % Helpers
-    % ==========
-
     function [tMonths, bal] = simulate_balance(S, T, L, i, pi, P0, C)
-        % Simulates nominal account balance with end-of-month contributions,
-        % then end-of-month inflation-adjusted withdrawals in retirement.
-        j  = i  / 12;                 % nominal monthly return
-        g  = pi / 12;                 % monthly inflation
-        Nw = round(12 * T);           % months until retirement
-        Nr = round(12 * L);           % months in retirement
+        j  = i  / 12;
+        g  = pi / 12;
+        Nw = round(12 * T);
+        Nr = round(12 * L);
         total = Nw + Nr;
 
         bal = zeros(total + 1, 1);
         bal(1) = P0;
 
-        % Accumulation (end-of-month deposits)
         for t = 1:Nw
             bal(t+1) = bal(t) * (1 + j) + C;
         end
 
-        % Drawdown (end-of-month withdrawals, inflation-adjusted)
         for t = Nw+1:total
-            m = t - Nw;  % month in retirement (1..Nr)
-            withdrawNom = S * (1 + g)^(Nw + m); % S in today's $ -> nominal at this month-end
+            m = t - Nw;
+            withdrawNom = S * (1 + g)^(Nw + m);
             bal(t+1) = bal(t) * (1 + j) - withdrawNom;
         end
 
-        tMonths = (0:total)';         % 0..(Nw+Nr) months
-    end % simulate_balance
+        tMonths = (0:total)';
+    end
 
     function validateInputs(S,T,L,rMin,rMax,pi,P0,age)
         if S < 0 || T < 0 || L < 0 || P0 < 0 || age < 0
@@ -261,15 +384,13 @@ function retirement_planner_gui
         if age > 120
             error('Please enter a plausible age (0–120).');
         end
-    end % validateInputs
+    end
 
     function out = dollar(v)
         out = sprintf('$%s', formatMoney(v));
-    end % dollar
+    end
 
     function s = formatMoney(x)
-        % Robust money formatting across MATLAB versions.
-        % Try compose with grouping, then Java NumberFormat, else fallback.
         try
             s = compose('%,.2f', x);
             s = s{1};
@@ -288,6 +409,9 @@ function retirement_planner_gui
                 s = sprintf('%.2f', x);
             end
         end
-    end % formatMoney
+    end
 
-end % retirement_planner_gui
+    % Start on page 1
+    showPage(1);
+
+end
