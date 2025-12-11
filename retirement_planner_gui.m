@@ -1,5 +1,5 @@
 function retirement_planner_gui
-% RETIREMENT_PLANNER_GUI (wizard version)
+% RETIREMENT_PLANNER_GUI
 % Step 1: compute S from cost categories
 % Step 2: specify retirement horizon, inflation, return range, current savings, age
 % Step 3: view required contributions and balance graphs (for a range of returns)
